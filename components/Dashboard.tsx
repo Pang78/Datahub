@@ -5,11 +5,11 @@ import {
 } from 'recharts';
 import { AnalysisResult, Dataset, ChartType, ChartConfiguration, ChatMessage, Sheet, AggregationType } from '../types';
 import { getSmartColor } from '../utils/dataUtils';
-import { askDatasetQuestion, generateChartForecast } from '../services/geminiService';
+import { askDatasetQuestion, askSheetQuestion, generateChartForecast } from '../services/geminiService';
 import { 
   Download, Share2, Filter, Lightbulb, TrendingUp, FileText, Send, MessageSquare, Bot, User, Loader2,
   BarChart3, PieChart as PieChartIcon, LineChart as LineChartIcon, ScatterChart as ScatterChartIcon, AreaChart as AreaChartIcon,
-  Wand2, Settings2, ChevronDown, Table2, LayoutDashboard, BrainCircuit, Layers
+  Wand2, Settings2, ChevronDown, Table2, LayoutDashboard, BrainCircuit, Layers, X
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -90,15 +90,42 @@ const InteractiveChart: React.FC<InteractiveChartProps> = ({ initialConfig, shee
   const [isForecasting, setIsForecasting] = useState(false);
   const [forecastData, setForecastData] = useState<any[]>([]);
 
-  // Memoize aggregated data
+  // Memoize aggregated data and handle forecast merging
   const processedData = useMemo(() => {
     // 1. Aggregate
     const baseData = aggregateData(sheet.rawData, xAxis, yKey, aggregation, groupBy || undefined);
     
-    // 2. Append forecast if exists
+    // 2. Append forecast if exists, with special handling for visualization
     if (forecastData.length > 0) {
-      return [...baseData, ...forecastData];
+       const forecastKey = `${yKey}_forecast`;
+       
+       // Clone base data to avoid mutation issues and prepare for split lines
+       const combined = baseData.map(item => ({
+         ...item,
+         [forecastKey]: null // Ensure forecast key is null for history
+       }));
+
+       // To connect the history line to the forecast line visually, 
+       // the last history point must also be the first point of the forecast line (or overlapping).
+       // We add the forecast value to the last history item.
+       if (combined.length > 0) {
+         const lastItem = combined[combined.length - 1];
+         lastItem[forecastKey] = lastItem[yKey];
+       }
+
+       // Append forecast items
+       forecastData.forEach(item => {
+         combined.push({
+           ...item,
+           [yKey]: null, // History key is null
+           [forecastKey]: item[yKey], // Value is in forecast key
+           _isForecast: true
+         });
+       });
+
+       return combined;
     }
+
     return baseData;
   }, [sheet.rawData, xAxis, yKey, aggregation, groupBy, forecastData]);
 
@@ -110,8 +137,11 @@ const InteractiveChart: React.FC<InteractiveChartProps> = ({ initialConfig, shee
     if (isForecasting) return;
     setIsForecasting(true);
     try {
-      // Forecast on the aggregated data
-      const predictedPoints = await generateChartForecast(processedData, xAxis, yKey);
+      // Forecast on the aggregated data (base data only, filter out any previous forecast if we were to re-run)
+      // We pass the raw aggregated data without the split keys for the AI context
+      const baseForAI = aggregateData(sheet.rawData, xAxis, yKey, aggregation, groupBy || undefined);
+      
+      const predictedPoints = await generateChartForecast(baseForAI, xAxis, yKey);
       if (predictedPoints && predictedPoints.length > 0) {
         const tagged = predictedPoints.map(p => ({ ...p, _isForecast: true }));
         setForecastData(tagged);
@@ -124,8 +154,9 @@ const InteractiveChart: React.FC<InteractiveChartProps> = ({ initialConfig, shee
   };
 
   const renderChart = () => {
-    const data = processedData; // .slice(-50) if too large?
+    const data = processedData; 
     const colors = config.colors || [];
+    const forecastKey = `${yKey}_forecast`;
 
     const CommonAxis = () => (
       <>
@@ -145,8 +176,9 @@ const InteractiveChart: React.FC<InteractiveChartProps> = ({ initialConfig, shee
         />
         <RechartsTooltip 
           contentStyle={{ backgroundColor: '#fff', borderRadius: '8px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
+          labelStyle={{ color: '#64748b', fontSize: '12px' }}
         />
-        <Legend />
+        <Legend wrapperStyle={{ paddingTop: '10px' }}/>
       </>
     );
 
@@ -183,15 +215,32 @@ const InteractiveChart: React.FC<InteractiveChartProps> = ({ initialConfig, shee
                 </defs>
               )}
               <CommonAxis />
+              
+              {/* Historical Data Line/Area */}
               <DataComponent 
                 type="monotone" 
                 dataKey={yKey} 
                 stroke={getSmartColor(0)} 
                 fill={chartType === ChartType.AREA ? `url(#grad-${yKey})` : undefined}
                 strokeWidth={2}
-                dot={(props: any) => props.payload._isForecast ? <circle r={4} fill="#fff" stroke={getSmartColor(0)} strokeWidth={2} cx={props.cx} cy={props.cy} /> : false}
+                name={yKey}
+                activeDot={{ r: 6 }}
               />
-              {/* If forecast exists, we can add a second line for visualization if needed, but the dot indicator helps */}
+
+              {/* Forecast Data Line/Area (Dashed) */}
+              {forecastData.length > 0 && (
+                <DataComponent
+                  type="monotone"
+                  dataKey={forecastKey}
+                  stroke={getSmartColor(0)}
+                  strokeDasharray="5 5"
+                  fill={chartType === ChartType.AREA ? `url(#grad-${yKey})` : undefined}
+                  fillOpacity={0.1}
+                  strokeWidth={2}
+                  name="Forecast"
+                  dot={{ r: 4, fill: "#fff", stroke: getSmartColor(0), strokeWidth: 2 }}
+                />
+              )}
             </ChartComponent>
           </ResponsiveContainer>
         );
@@ -319,11 +368,12 @@ const InteractiveChart: React.FC<InteractiveChartProps> = ({ initialConfig, shee
         {(chartType === ChartType.LINE || chartType === ChartType.AREA) && (
             <button 
                 onClick={handleForecast}
-                disabled={isForecasting || forecastData.length > 0}
+                disabled={isForecasting || forecastData.length > 0 || !!groupBy}
                 className="mt-3 w-full flex items-center justify-center gap-2 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors disabled:opacity-50"
             >
                 {isForecasting ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />}
                 {forecastData.length > 0 ? "Forecast Applied" : "Generate AI Forecast"}
+                {!!groupBy && <span className="text-[10px] opacity-70 ml-1">(N/A with Stack)</span>}
             </button>
         )}
       </div>
@@ -340,12 +390,15 @@ const InteractiveChart: React.FC<InteractiveChartProps> = ({ initialConfig, shee
 const Dashboard: React.FC<DashboardProps> = ({ dataset, analysis, onReset }) => {
   const [activeTab, setActiveTab] = useState<string>('overview'); // 'overview' or sheetName
   const [question, setQuestion] = useState('');
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
+  // Use a map to store chat history per sheet (or overview)
+  const [chatHistories, setChatHistories] = useState<Record<string, ChatMessage[]>>({});
   const [isAsking, setIsAsking] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const activeSheet = dataset.sheets.find(s => s.sheetName === activeTab);
-  
+  const activeHistory = chatHistories[activeTab] || [];
+
   // Filter charts for current view
   const currentCharts = activeTab === 'overview' 
     ? analysis.charts 
@@ -373,28 +426,43 @@ const Dashboard: React.FC<DashboardProps> = ({ dataset, analysis, onReset }) => 
     if (!question.trim() || isAsking) return;
 
     const userMsg: ChatMessage = { id: Date.now().toString(), role: 'user', content: question, timestamp: new Date() };
-    setChatHistory(prev => [...prev, userMsg]);
+    
+    // Optimistic update
+    const updatedHistory = [...activeHistory, userMsg];
+    setChatHistories(prev => ({ ...prev, [activeTab]: updatedHistory }));
+    
     setQuestion('');
     setIsAsking(true);
 
     try {
-      const answer = await askDatasetQuestion(dataset, userMsg.content);
+      let answer = "";
+      if (activeTab === 'overview') {
+        answer = await askDatasetQuestion(dataset, userMsg.content);
+      } else {
+        const sheet = dataset.sheets.find(s => s.sheetName === activeTab);
+        if (sheet) {
+          answer = await askSheetQuestion(sheet, userMsg.content);
+        } else {
+          answer = "Error: Sheet context not found.";
+        }
+      }
+
       const botMsg: ChatMessage = { id: (Date.now() + 1).toString(), role: 'assistant', content: answer, timestamp: new Date() };
-      setChatHistory(prev => [...prev, botMsg]);
+      setChatHistories(prev => ({ ...prev, [activeTab]: [...updatedHistory, botMsg] }));
     } catch {
-      setChatHistory(prev => [...prev, { id: 'err', role: 'assistant', content: "Error fetching answer.", timestamp: new Date() }]);
+      setChatHistories(prev => ({ ...prev, [activeTab]: [...updatedHistory, { id: 'err', role: 'assistant', content: "Error fetching answer.", timestamp: new Date() }] }));
     } finally {
       setIsAsking(false);
     }
   };
 
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatHistory, isAsking]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatHistories, isAsking, activeTab]);
 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-900">
       
       {/* Sidebar */}
-      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 transition-all duration-300">
+      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 transition-all duration-300 hidden md:flex">
         <div className="h-16 flex items-center px-6 border-b border-slate-800">
             <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold mr-3 shadow-lg shadow-indigo-900/50">IF</div>
             <span className="text-white font-bold text-lg tracking-tight">InsightFlow</span>
@@ -438,27 +506,38 @@ const Dashboard: React.FC<DashboardProps> = ({ dataset, analysis, onReset }) => 
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col h-full overflow-hidden">
+      <main className="flex-1 flex flex-col h-full overflow-hidden relative">
         {/* Header */}
-        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0">
-            <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                {activeTab === 'overview' ? 'Executive Overview' : activeTab}
-                {activeTab !== 'overview' && <span className="text-sm font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{activeSheet?.rowCount} rows</span>}
-            </h2>
+        <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-8 shrink-0 z-10">
+            <div className="flex items-center gap-4">
+               {/* Mobile/Tablet Menu Button could go here if left sidebar needs toggle */}
+               <h2 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2">
+                  {activeTab === 'overview' ? 'Executive Overview' : activeTab}
+                  {activeTab !== 'overview' && <span className="hidden sm:inline-block text-sm font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full">{activeSheet?.rowCount} rows</span>}
+               </h2>
+            </div>
+            
             <div className="flex gap-2">
+                <button 
+                  onClick={() => setIsChatOpen(!isChatOpen)}
+                  className={`p-2 rounded-lg transition-colors xl:hidden ${isChatOpen ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}
+                  title="Toggle AI Assistant"
+                >
+                  <MessageSquare size={20} />
+                </button>
                 <button className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-lg transition-colors"><Download size={20} /></button>
             </div>
         </header>
 
         {/* Scrollable Body */}
-        <div className="flex-1 overflow-y-auto p-8">
+        <div className="flex-1 overflow-y-auto p-4 sm:p-8">
             <div className="max-w-7xl mx-auto space-y-8 pb-10">
                 
                 {/* 1. Insights Section (Overview Only) */}
                 {activeTab === 'overview' && (
                     <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
                         {/* Summary Card */}
-                        <div className="bg-gradient-to-r from-indigo-600 to-violet-600 rounded-2xl p-8 text-white shadow-xl shadow-indigo-200">
+                        <div className="bg-gradient-to-r from-indigo-600 to-violet-600 rounded-2xl p-6 sm:p-8 text-white shadow-xl shadow-indigo-200">
                             <h3 className="text-2xl font-bold mb-4">Analysis Summary</h3>
                             <p className="text-indigo-100 text-lg leading-relaxed max-w-4xl">{analysis.summary}</p>
                             
@@ -534,22 +613,27 @@ const Dashboard: React.FC<DashboardProps> = ({ dataset, analysis, onReset }) => 
             </div>
         </div>
 
-        {/* Chat / Q&A Floating Widget or Panel - Integrated into right side if screen large, or bottom */}
-        {/* For this design, let's keep it as a bottom panel in the main content or a drawer. Let's make it a fixed drawer on the right. */}
-        <div className="w-96 border-l border-slate-200 bg-white flex flex-col fixed right-0 top-16 bottom-0 shadow-2xl translate-x-full xl:translate-x-0 transition-transform z-20">
-             <div className="p-4 border-b border-slate-100 bg-indigo-50/50">
+        {/* Chat / Q&A Floating Widget or Panel */}
+        {/* Responsive Drawer: Hidden on small unless toggled, Always visible on XL */}
+        <div className={`w-96 border-l border-slate-200 bg-white flex flex-col fixed right-0 top-16 bottom-0 shadow-2xl transition-transform duration-300 z-30 ${isChatOpen ? 'translate-x-0' : 'translate-x-full xl:translate-x-0'}`}>
+             <div className="p-4 border-b border-slate-100 bg-indigo-50/50 flex items-center justify-between">
                 <h3 className="font-bold text-slate-800 flex items-center gap-2">
                     <Bot className="text-indigo-600" />
-                    Data Assistant
+                    {activeTab === 'overview' ? 'Assistant' : `Chat: ${activeTab}`}
                 </h3>
+                {/* Close button for mobile */}
+                <button onClick={() => setIsChatOpen(false)} className="p-1 text-slate-400 hover:text-slate-600 xl:hidden">
+                    <X size={18}/>
+                </button>
              </div>
              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50/30">
-                 {chatHistory.length === 0 && (
-                     <div className="text-center text-slate-400 mt-10">
-                         <p className="text-sm">Ask me about trends, outliers, or specific values in your data.</p>
+                 {activeHistory.length === 0 && (
+                     <div className="text-center text-slate-400 mt-10 px-4">
+                         <p className="text-sm mb-2">Ask me about trends, outliers, or specific values in {activeTab === 'overview' ? 'your workbook' : `the "${activeTab}" sheet`}.</p>
+                         <p className="text-xs text-slate-300">"What is the total sales?"</p>
                      </div>
                  )}
-                 {chatHistory.map(msg => (
+                 {activeHistory.map(msg => (
                      <div key={msg.id} className={`flex gap-2 ${msg.role === 'user' ? 'justify-end' : ''}`}>
                          <div className={`rounded-xl p-3 text-sm max-w-[85%] ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border border-slate-200 text-slate-700'}`}>
                              {msg.content}
@@ -563,7 +647,7 @@ const Dashboard: React.FC<DashboardProps> = ({ dataset, analysis, onReset }) => 
                  <form onSubmit={handleAskQuestion} className="relative">
                      <input 
                        className="w-full pl-4 pr-10 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none transition-all"
-                       placeholder="Ask a question..."
+                       placeholder={activeTab === 'overview' ? "Ask about the workbook..." : `Ask about ${activeTab}...`}
                        value={question}
                        onChange={e => setQuestion(e.target.value)}
                      />

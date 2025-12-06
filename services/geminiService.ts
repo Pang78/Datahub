@@ -1,4 +1,3 @@
-
 import { GoogleGenAI, Type } from "@google/genai";
 import { Dataset, AnalysisResult, ChartType, Sheet } from '../types';
 
@@ -126,6 +125,40 @@ export const askDatasetQuestion = async (dataset: Dataset, question: string): Pr
     return response.text || "I couldn't generate an answer.";
   } catch (error) {
     console.error("Gemini Q&A Error:", error);
+    throw new Error("Failed to get an answer.");
+  }
+};
+
+export const askSheetQuestion = async (sheet: Sheet, question: string): Promise<string> => {
+  try {
+    const context = {
+      sheetName: sheet.sheetName,
+      columns: sheet.columns,
+      sampleData: sheet.rawData.slice(0, 100) // Slightly larger sample for single-sheet focus
+    };
+
+    const prompt = `
+      You are a specialized data analyst focusing on the "${sheet.sheetName}" sheet.
+      
+      Here is the schema and a sample of 100 rows:
+      ${JSON.stringify(context)}
+
+      User Question: ${question}
+
+      Instructions:
+      1. Provide a direct answer based on the sample data.
+      2. If the question involves data outside the sample, explain how you would calculate it if you had full access, or give the answer based on the visible rows.
+      3. Detect trends or anomalies if relevant to the question.
+    `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: prompt,
+    });
+
+    return response.text || "I couldn't generate an answer for this sheet.";
+  } catch (error) {
+    console.error("Gemini Sheet Q&A Error:", error);
     throw new Error("Failed to get an answer.");
   }
 };
