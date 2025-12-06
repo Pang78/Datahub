@@ -1,0 +1,5 @@
+{
+  "name": "InsightFlow AI",
+  "description": "An automated, intelligent data analysis platform that transforms raw Excel/CSV data into interactive dashboards and narratives using Gemini 2.5.",
+  "requestFramePermissions": []
+}
