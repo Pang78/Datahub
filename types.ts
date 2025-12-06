@@ -45,6 +45,13 @@ export interface ChartConfiguration {
   colors: string[];
 }
 
+export interface PivotConfiguration {
+  rowLabel: string;
+  colLabel: string;
+  valueField: string;
+  aggregation: AggregationType;
+}
+
 export interface AnalysisResult {
   summary: string;
   crossSheetInsights: string[]; // Insights derived from looking at multiple sheets

@@ -94,72 +94,61 @@ export const analyzeDatasetWithGemini = async (dataset: Dataset): Promise<Analys
   }
 };
 
-export const askDatasetQuestion = async (dataset: Dataset, question: string): Promise<string> => {
+// --- Streaming Q&A ---
+
+export const streamAskQuestion = async function* (
+  contextData: any, 
+  contextType: 'overview' | 'sheet',
+  question: string
+) {
   try {
-    // Send samples from ALL sheets to give context
-    const context = dataset.sheets.map(s => ({
-      sheet: s.sheetName,
-      sample: s.rawData.slice(0, 50) // Reduce sample size per sheet to fit context
-    }));
+    let promptContext = "";
+    
+    if (contextType === 'overview') {
+      const dataset = contextData as Dataset;
+      const samples = dataset.sheets.map(s => ({
+        sheet: s.sheetName,
+        sample: s.rawData.slice(0, 30) 
+      }));
+      promptContext = `
+        Context: Full Workbook Overview.
+        Sheets & Samples: ${JSON.stringify(samples)}
+      `;
+    } else {
+      const sheet = contextData as Sheet;
+      promptContext = `
+        Context: Specific Sheet "${sheet.sheetName}".
+        Schema: ${JSON.stringify(sheet.columns)}
+        Sample Data (first 100 rows): ${JSON.stringify(sheet.rawData.slice(0, 100))}
+      `;
+    }
 
     const prompt = `
-      You are a helpful data assistant. I have a workbook named "${dataset.fileName}".
+      You are a specialized data analyst.
+      ${promptContext}
       
-      Here are data samples from the sheets:
-      ${JSON.stringify(context)}
-
-      Question: ${question}
-
-      Instructions:
-      1. Analyze the samples provided.
-      2. If the user asks for aggregations (total, average), calculate them based on the sample provided and explicitly state "Based on the sample data provided...".
-      3. If the answer requires joining sheets, explain the logic.
-      4. Be concise and professional.
-    `;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-    });
-
-    return response.text || "I couldn't generate an answer.";
-  } catch (error) {
-    console.error("Gemini Q&A Error:", error);
-    throw new Error("Failed to get an answer.");
-  }
-};
-
-export const askSheetQuestion = async (sheet: Sheet, question: string): Promise<string> => {
-  try {
-    const context = {
-      sheetName: sheet.sheetName,
-      columns: sheet.columns,
-      sampleData: sheet.rawData.slice(0, 100) // Slightly larger sample for single-sheet focus
-    };
-
-    const prompt = `
-      You are a specialized data analyst focusing on the "${sheet.sheetName}" sheet.
-      
-      Here is the schema and a sample of 100 rows:
-      ${JSON.stringify(context)}
-
       User Question: ${question}
 
       Instructions:
-      1. Provide a direct answer based on the sample data.
-      2. If the question involves data outside the sample, explain how you would calculate it if you had full access, or give the answer based on the visible rows.
-      3. Detect trends or anomalies if relevant to the question.
+      1. Answer concisely.
+      2. If calculating, state "Based on the provided sample...".
+      3. Use markdown for tables or lists if needed.
     `;
 
-    const response = await ai.models.generateContent({
+    const responseStream = await ai.models.generateContentStream({
       model: "gemini-2.5-flash",
       contents: prompt,
     });
 
-    return response.text || "I couldn't generate an answer for this sheet.";
+    for await (const chunk of responseStream) {
+      if (chunk.text) {
+        yield chunk.text;
+      }
+    }
+
   } catch (error) {
-    console.error("Gemini Sheet Q&A Error:", error);
-    throw new Error("Failed to get an answer.");
+    console.error("Gemini Stream Error:", error);
+    yield "Sorry, I encountered an error analyzing the data.";
   }
 };
 
