@@ -130,9 +130,11 @@ export const streamAskQuestion = async function* (
       User Question: ${question}
 
       Instructions:
-      1. Answer concisely.
-      2. If calculating, state "Based on the provided sample...".
-      3. Use markdown for tables or lists if needed.
+      1. Answer using proper, conversational English sentences.
+      2. Do NOT use Markdown formatting (no asterisks, hash marks, tables, or bold text).
+      3. Do NOT use bullet points or lists; present information in smooth paragraphs.
+      4. If calculating, state "Based on the provided sample...".
+      5. Keep the response concise but friendly.
     `;
 
     const responseStream = await ai.models.generateContentStream({

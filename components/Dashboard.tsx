@@ -9,7 +9,7 @@ import { streamAskQuestion, generateChartForecast } from '../services/geminiServ
 import { 
   Download, Share2, Filter, Lightbulb, TrendingUp, FileText, Send, MessageSquare, Bot, User, Loader2,
   BarChart3, PieChart as PieChartIcon, LineChart as LineChartIcon, ScatterChart as ScatterChartIcon, AreaChart as AreaChartIcon,
-  Wand2, Settings2, ChevronDown, Table2, LayoutDashboard, BrainCircuit, Layers, X, Grid3X3, ArrowUpDown
+  Wand2, Settings2, ChevronDown, Table2, LayoutDashboard, BrainCircuit, Layers, X, Grid3X3, ArrowUpDown, Menu
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -386,10 +386,13 @@ const Dashboard: React.FC<DashboardProps> = ({ dataset, analysis, onReset }) => 
   const [activeTab, setActiveTab] = useState<string>('overview'); 
   const [sheetViewMode, setSheetViewMode] = useState<'chart' | 'pivot' | 'data'>('chart');
   
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+  
   const [question, setQuestion] = useState('');
   const [chatHistories, setChatHistories] = useState<Record<string, ChatMessage[]>>({});
   const [isAsking, setIsAsking] = useState(false);
-  const [isChatOpen, setIsChatOpen] = useState(false);
+  
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   const activeSheet = dataset.sheets.find(s => s.sheetName === activeTab);
@@ -452,13 +455,29 @@ const Dashboard: React.FC<DashboardProps> = ({ dataset, analysis, onReset }) => 
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans text-slate-900">
       
+      {/* Mobile Sidebar Overlay */}
+      {isSidebarOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 md:hidden"
+          onClick={() => setIsSidebarOpen(false)}
+        />
+      )}
+
       {/* Sidebar */}
-      <aside className="w-64 bg-slate-900 text-slate-300 flex flex-col shrink-0 transition-all duration-300 hidden md:flex">
-        <div className="h-16 flex items-center px-6 border-b border-slate-800">
-            <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold mr-3 shadow-lg shadow-indigo-900/50">IF</div>
-            <span className="text-white font-bold text-lg tracking-tight">InsightFlow</span>
+      <aside className={`
+        fixed md:relative z-50 h-full bg-slate-900 text-slate-300 flex flex-col transition-all duration-300
+        ${isSidebarOpen ? 'translate-x-0 w-64' : '-translate-x-full md:translate-x-0 md:w-0 md:overflow-hidden'}
+      `}>
+        <div className="h-16 flex items-center justify-between px-6 border-b border-slate-800 whitespace-nowrap overflow-hidden shrink-0">
+            <div className="flex items-center">
+              <div className="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center text-white font-bold mr-3 shadow-lg shadow-indigo-900/50">IF</div>
+              <span className="text-white font-bold text-lg tracking-tight">InsightFlow</span>
+            </div>
+            <button onClick={() => setIsSidebarOpen(false)} className="md:hidden text-slate-400">
+              <X size={20} />
+            </button>
         </div>
-        <div className="flex-1 overflow-y-auto py-6 px-3 space-y-6">
+        <div className="flex-1 overflow-y-auto py-6 px-3 space-y-6 min-w-[16rem]">
             <div>
                 <h3 className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Dashboards</h3>
                 <button onClick={() => setActiveTab('overview')} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${activeTab === 'overview' ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800'}`}>
@@ -475,6 +494,15 @@ const Dashboard: React.FC<DashboardProps> = ({ dataset, analysis, onReset }) => 
                     ))}
                 </div>
             </div>
+
+            {/* Tools Section - Now explicitly added */}
+            <div>
+                <h3 className="px-3 text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Tools</h3>
+                 <button onClick={() => { setIsChatOpen(true); if(window.innerWidth < 768) setIsSidebarOpen(false); }} className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${isChatOpen ? 'bg-indigo-600 text-white' : 'hover:bg-slate-800'}`}>
+                    <Bot size={18} /> AI Assistant
+                </button>
+            </div>
+
             <div className="pt-4 border-t border-slate-800">
                 <button onClick={onReset} className="w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:text-white hover:bg-slate-800 transition-colors">
                     <Share2 size={18} /> Import New File
@@ -484,23 +512,37 @@ const Dashboard: React.FC<DashboardProps> = ({ dataset, analysis, onReset }) => 
       </aside>
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col h-full overflow-hidden relative">
+      <main className="flex-1 flex flex-col h-full overflow-hidden relative transition-all duration-300">
         <header className="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-4 sm:px-8 shrink-0 z-10">
             <div className="flex items-center gap-4">
+               {/* Hamburger Button */}
+               <button onClick={() => setIsSidebarOpen(!isSidebarOpen)} className="p-2 -ml-2 text-slate-600 hover:bg-slate-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                 <Menu size={20} />
+               </button>
                <h2 className="text-lg sm:text-xl font-bold text-slate-800 flex items-center gap-2">
                   {activeTab === 'overview' ? 'Executive Overview' : activeTab}
                </h2>
                {activeTab !== 'overview' && (
-                 <div className="hidden sm:flex bg-slate-100 p-1 rounded-lg">
+                 <div className="hidden sm:flex bg-slate-100 p-1 rounded-lg ml-4">
                     <button onClick={() => setSheetViewMode('chart')} className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${sheetViewMode === 'chart' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Charts</button>
                     <button onClick={() => setSheetViewMode('pivot')} className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${sheetViewMode === 'pivot' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Pivot Table</button>
                     <button onClick={() => setSheetViewMode('data')} className={`px-3 py-1 text-xs font-medium rounded-md transition-all ${sheetViewMode === 'data' ? 'bg-white shadow text-slate-800' : 'text-slate-500 hover:text-slate-700'}`}>Data</button>
                  </div>
                )}
             </div>
+            
+            {/* Top Right Actions */}
             <div className="flex gap-2">
-                <button onClick={() => setIsChatOpen(!isChatOpen)} className={`p-2 rounded-lg transition-colors xl:hidden ${isChatOpen ? 'text-indigo-600 bg-indigo-50' : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50'}`}>
-                  <MessageSquare size={20} />
+                <button 
+                   onClick={() => setIsChatOpen(!isChatOpen)}
+                   className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium transition-all shadow-sm
+                      ${isChatOpen 
+                         ? 'bg-slate-100 text-slate-600 border border-slate-200' 
+                         : 'bg-indigo-600 text-white shadow-indigo-200 hover:bg-indigo-700 hover:shadow-md'
+                      }`}
+                >
+                   <MessageSquare size={18} />
+                   <span className="hidden sm:inline">AI Chat</span>
                 </button>
             </div>
         </header>
@@ -586,13 +628,13 @@ const Dashboard: React.FC<DashboardProps> = ({ dataset, analysis, onReset }) => 
         </div>
 
         {/* Streaming Chat Drawer */}
-        <div className={`w-96 border-l border-slate-200 bg-white flex flex-col fixed right-0 top-16 bottom-0 shadow-2xl transition-transform duration-300 z-30 ${isChatOpen ? 'translate-x-0' : 'translate-x-full xl:translate-x-0'}`}>
+        <div className={`w-96 border-l border-slate-200 bg-white flex flex-col fixed right-0 top-16 bottom-0 shadow-2xl transition-transform duration-300 z-30 ${isChatOpen ? 'translate-x-0' : 'translate-x-full'}`}>
              <div className="p-4 border-b border-slate-100 bg-indigo-50/50 flex items-center justify-between">
                 <h3 className="font-bold text-slate-800 flex items-center gap-2">
                     <Bot className="text-indigo-600" />
                     {activeTab === 'overview' ? 'Assistant' : `Chat: ${activeTab}`}
                 </h3>
-                <button onClick={() => setIsChatOpen(false)} className="p-1 text-slate-400 hover:text-slate-600 xl:hidden">
+                <button onClick={() => setIsChatOpen(false)} className="p-1 text-slate-400 hover:text-slate-600">
                     <X size={18}/>
                 </button>
              </div>
